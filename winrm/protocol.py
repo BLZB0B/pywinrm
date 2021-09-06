@@ -25,6 +25,7 @@ class Protocol(object):
     """
     DEFAULT_READ_TIMEOUT_SEC = 30
     DEFAULT_OPERATION_TIMEOUT_SEC = 20
+    DEFAULT_LIFETIME_SEC = 28800 # (8hours)
     DEFAULT_MAX_ENV_SIZE = 153600
     DEFAULT_LOCALE = 'en-US'
 
@@ -36,6 +37,7 @@ class Protocol(object):
             kerberos_delegation=False,
             read_timeout_sec=DEFAULT_READ_TIMEOUT_SEC,
             operation_timeout_sec=DEFAULT_OPERATION_TIMEOUT_SEC,
+            lifetime_sec = DEFAULT_LIFETIME_SEC,
             kerberos_hostname_override=None,
             message_encryption='auto',
             credssp_disable_tlsv1_2=False,
@@ -60,6 +62,7 @@ class Protocol(object):
         @param bool kerberos_delegation: if True, TGT is sent to target server to allow multiple hops  # NOQA
         @param int read_timeout_sec: maximum seconds to wait before an HTTP connect/read times out (default 30). This value should be slightly higher than operation_timeout_sec, as the server can block *at least* that long. # NOQA
         @param int operation_timeout_sec: maximum allowed time in seconds for any single wsman HTTP operation (default 20). Note that operation timeouts while receiving output (the only wsman operation that should take any significant time, and where these timeouts are expected) will be silently retried indefinitely. # NOQA
+        @param int lifetime_sec: maximum allowed time in seconds the remote shell will remain active
         @param string kerberos_hostname_override: the hostname to use for the kerberos exchange (defaults to the hostname in the endpoint URL)
         @param bool message_encryption_enabled: Will encrypt the WinRM messages if set to True and the transport auth supports message encryption (Default True).
         @param string proxy: Specify a proxy for the WinRM connection to use. 'legacy_requests'(default) to use environment variables, None to disable proxies completely or the proxy URL itself.
@@ -75,11 +78,17 @@ class Protocol(object):
         except ValueError as ve:
             raise ValueError("failed to parse operation_timeout_sec as int: %s" % str(ve))
 
+        try:
+            lifetime_sec = int(lifetime_sec)
+        except ValueError as ve:
+            raise ValueError("failed to parse lifetime_sec as int: %s" % str(ve))
+
         if operation_timeout_sec >= read_timeout_sec or operation_timeout_sec < 1:
             raise WinRMError("read_timeout_sec must exceed operation_timeout_sec, and both must be non-zero")
 
         self.read_timeout_sec = read_timeout_sec
         self.operation_timeout_sec = operation_timeout_sec
+        self.lifetime_sec = lifetime_sec
         self.max_env_sz = Protocol.DEFAULT_MAX_ENV_SIZE
         self.locale = Protocol.DEFAULT_LOCALE
 
@@ -110,7 +119,7 @@ class Protocol(object):
 
     def open_shell(self, i_stream='stdin', o_stream='stdout stderr',
                    working_directory=None, env_vars=None, noprofile=False,
-                   codepage=437, lifetime=None, idle_timeout=None):
+                   codepage=437, lifetime_sec=None, idle_timeout=None):
         """
         Create a Shell on the destination host
         @param string i_stream: Which input stream to open. Leave this alone
@@ -150,12 +159,15 @@ class Protocol(object):
         if working_directory:
             # TODO ensure that rsp:WorkingDirectory should be nested within rsp:Shell  # NOQA
             shell['rsp:WorkingDirectory'] = working_directory
-            # TODO check Lifetime param: http://msdn.microsoft.com/en-us/library/cc251546(v=PROT.13).aspx  # NOQA
-            # if lifetime:
-            #    shell['rsp:Lifetime'] = iso8601_duration.sec_to_dur(lifetime)
+
+        # TODO check Lifetime param: http://msdn.microsoft.com/en-us/library/cc251546(v=PROT.13).aspx  # NOQA
+        if lifetime_sec:
+            shell['rsp:Lifetime'] = lifetime_sec
+
         # TODO make it so the input is given in milliseconds and converted to xs:duration  # NOQA
         if idle_timeout:
             shell['rsp:IdleTimeOut'] = idle_timeout
+
         if env_vars:
             # the rsp:Variable tag needs to be list of variables so that all
             # environment variables in the env_vars dict are set on the shell
